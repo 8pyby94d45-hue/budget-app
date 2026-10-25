@@ -126,7 +126,9 @@
 <script>
 (function () {
   var tg = window.Telegram && window.Telegram.WebApp;
-  var inTelegram = !!(tg && tg.initData);
+  // Внутри Телеграма platform содержит название системы, вне него — "unknown".
+  // initData тут проверять нельзя: у приложений, открытых кнопкой под полем ввода, он пустой.
+  var inTelegram = !!(tg && tg.platform && tg.platform !== "unknown");
   if (tg) {
     try { tg.ready(); tg.expand(); } catch (e) {}
   }
