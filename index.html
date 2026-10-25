@@ -1,0 +1,238 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Бюджет</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+  :root {
+    --bg: var(--tg-theme-bg-color, #ffffff);
+    --card: var(--tg-theme-secondary-bg-color, #f1f2f6);
+    --text: var(--tg-theme-text-color, #14151a);
+    --hint: var(--tg-theme-hint-color, #8b8f99);
+    --expense: #ef5b5b;
+    --income: #2fb36a;
+    --mode: var(--expense);
+  }
+  body[data-type="income"] { --mode: var(--income); }
+
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    padding-bottom: 110px;
+  }
+  .wrap { max-width: 480px; margin: 0 auto; padding: 16px; }
+  h1 { font-size: 24px; margin: 6px 4px 16px; }
+
+  .seg {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 4px;
+    background: var(--card); border-radius: 16px; padding: 4px;
+  }
+  .seg button {
+    border: 0; background: transparent; color: var(--hint);
+    font-family: inherit; font-size: 15px; font-weight: 600;
+    padding: 12px; border-radius: 12px; cursor: pointer;
+    transition: background .15s, color .15s;
+  }
+  .seg button.active {
+    background: var(--bg); color: var(--mode);
+    box-shadow: 0 1px 4px rgba(0, 0, 0, .12);
+  }
+
+  .amount-card {
+    margin-top: 16px; background: var(--card);
+    border-radius: 20px; padding: 18px 20px;
+  }
+  .label {
+    font-size: 13px; color: var(--hint);
+    text-transform: uppercase; letter-spacing: .04em;
+  }
+  .amount-row { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+  #amount {
+    flex: 1; min-width: 0; border: 0; outline: 0; background: transparent;
+    font-size: 44px; font-weight: 700; color: var(--mode); font-family: inherit;
+  }
+  #amount::placeholder { color: var(--hint); opacity: .5; }
+  .currency { font-size: 30px; font-weight: 600; color: var(--hint); }
+
+  .section { margin: 22px 4px 10px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; }
+  .chip {
+    border: 2px solid transparent; background: var(--card); color: var(--text);
+    font-size: 15px; font-family: inherit; padding: 10px 16px;
+    border-radius: 999px; cursor: pointer;
+    transition: border-color .15s, transform .1s;
+  }
+  .chip:active { transform: scale(.96); }
+  .chip.selected { border-color: var(--mode); font-weight: 600; color: var(--mode); }
+
+  #custom {
+    width: 100%; margin-top: 12px; border: 0; outline: 0;
+    background: var(--card); color: var(--text);
+    font-size: 16px; font-family: inherit;
+    padding: 14px 16px; border-radius: 14px;
+  }
+  #custom::placeholder { color: var(--hint); }
+
+  #msg { min-height: 22px; margin: 14px 6px 0; font-size: 14px; color: var(--expense); }
+  #msg.info { color: var(--hint); }
+
+  .footer {
+    position: fixed; left: 0; right: 0; bottom: 0;
+    padding: 12px 16px calc(12px + env(safe-area-inset-bottom));
+    background: var(--bg);
+  }
+  .save {
+    display: block; width: 100%; max-width: 480px; margin: 0 auto;
+    border: 0; border-radius: 16px; padding: 16px;
+    background: var(--mode); color: #fff;
+    font-family: inherit; font-size: 17px; font-weight: 700; cursor: pointer;
+  }
+  .save:active { opacity: .85; }
+</style>
+</head>
+<body data-type="expense">
+<div class="wrap">
+  <h1>Новая запись</h1>
+
+  <div class="seg">
+    <button type="button" id="btn-expense" class="active">Расход</button>
+    <button type="button" id="btn-income">Доход</button>
+  </div>
+
+  <div class="amount-card">
+    <div class="label">Сумма</div>
+    <div class="amount-row">
+      <input id="amount" type="text" inputmode="decimal" placeholder="0" autocomplete="off">
+      <span class="currency">₽</span>
+    </div>
+  </div>
+
+  <div class="section label" id="cat-title">Категория</div>
+  <div class="chips" id="chips"></div>
+  <input id="custom" type="text" maxlength="30" placeholder="Или напиши свою категорию" autocomplete="off">
+
+  <div id="msg"></div>
+</div>
+
+<div class="footer">
+  <button type="button" class="save" id="save">Сохранить расход</button>
+</div>
+
+<script>
+(function () {
+  var tg = window.Telegram && window.Telegram.WebApp;
+  var inTelegram = !!(tg && tg.initData);
+  if (tg) {
+    try { tg.ready(); tg.expand(); } catch (e) {}
+  }
+
+  var CATS = {
+    expense: ["Еда", "Транспорт", "Учёба", "Развлечения", "Другое"],
+    income: ["Стипендия", "Подработка", "Подарок", "Другое"]
+  };
+  var type = "expense";
+  var category = "";
+
+  var amountEl = document.getElementById("amount");
+  var customEl = document.getElementById("custom");
+  var chipsEl = document.getElementById("chips");
+  var msgEl = document.getElementById("msg");
+  var saveEl = document.getElementById("save");
+  var titleEl = document.getElementById("cat-title");
+  var btnExpense = document.getElementById("btn-expense");
+  var btnIncome = document.getElementById("btn-income");
+
+  function haptic(kind) {
+    try { tg.HapticFeedback.impactOccurred(kind); } catch (e) {}
+  }
+  function hapticError() {
+    try { tg.HapticFeedback.notificationOccurred("error"); } catch (e) {}
+  }
+
+  function showMsg(text, isInfo) {
+    msgEl.textContent = text;
+    msgEl.className = isInfo ? "info" : "";
+  }
+
+  function renderChips() {
+    chipsEl.innerHTML = "";
+    CATS[type].forEach(function (name) {
+      var b = document.createElement("button");
+      b.type = "button";
+      b.className = "chip" + (name === category ? " selected" : "");
+      b.textContent = name;
+      b.onclick = function () {
+        category = (category === name) ? "" : name;
+        customEl.value = "";
+        showMsg("");
+        haptic("light");
+        renderChips();
+      };
+      chipsEl.appendChild(b);
+    });
+  }
+
+  function setType(newType) {
+    type = newType;
+    category = "";
+    customEl.value = "";
+    document.body.setAttribute("data-type", type);
+    btnExpense.className = type === "expense" ? "active" : "";
+    btnIncome.className = type === "income" ? "active" : "";
+    titleEl.textContent = type === "expense" ? "Категория" : "Источник";
+    saveEl.textContent = type === "expense" ? "Сохранить расход" : "Сохранить доход";
+    showMsg("");
+    haptic("light");
+    renderChips();
+  }
+
+  btnExpense.onclick = function () { setType("expense"); };
+  btnIncome.onclick = function () { setType("income"); };
+
+  amountEl.addEventListener("input", function () {
+    amountEl.value = amountEl.value.replace(/[^0-9.,]/g, "");
+    showMsg("");
+  });
+  customEl.addEventListener("input", function () {
+    if (customEl.value) {
+      category = "";
+      renderChips();
+    }
+  });
+
+  saveEl.onclick = function () {
+    var amount = parseFloat(amountEl.value.replace(",", "."));
+    var cat = (customEl.value.trim() || category).toLowerCase();
+
+    if (!(amount > 0) || amount >= 1e12) {
+      showMsg("Введи сумму больше нуля");
+      hapticError();
+      amountEl.focus();
+      return;
+    }
+    if (type === "expense" && !cat) {
+      showMsg("Выбери категорию или напиши свою");
+      hapticError();
+      return;
+    }
+
+    var payload = { type: type, category: cat, amount: amount };
+
+    if (inTelegram) {
+      tg.sendData(JSON.stringify(payload));
+    } else {
+      showMsg("Страница открыта вне Телеграма, поэтому данные никуда не отправлены: " +
+              JSON.stringify(payload), true);
+    }
+  };
+
+  setType("expense");
+})();
+</script>
+</body>
+</html>
